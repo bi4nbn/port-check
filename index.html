@@ -1,0 +1,1520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PortPulse · 端口连通检测</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        :root {
+            --bg: #0a0a0f;
+            --surface: rgba(255, 255, 255, 0.03);
+            --surface-hover: rgba(255, 255, 255, 0.05);
+            --border: rgba(255, 255, 255, 0.08);
+            --border-strong: rgba(255, 255, 255, 0.15);
+            --text: #fafafa;
+            --text-dim: #a1a1aa;
+            --text-mute: #52525b;
+            --accent: #a78bfa;
+            --accent-2: #22d3ee;
+            --success: #34d399;
+            --danger: #fb7185;
+            --warning: #fbbf24;
+            --mono: 'JetBrains Mono', ui-monospace, monospace;
+            --sans: 'Space Grotesk', system-ui, sans-serif;
+        }
+
+        html,
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--sans);
+            min-height: 100vh;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            -webkit-text-size-adjust: 100%;
+        }
+
+        /* ===== 动态背景 ===== */
+        .bg-layer {
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            overflow: hidden;
+            pointer-events: none;
+        }
+
+        .orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.5;
+            animation: float 20s ease-in-out infinite;
+        }
+
+        .orb-1 {
+            width: 500px;
+            height: 500px;
+            background: radial-gradient(circle, #7c3aed 0%, transparent 70%);
+            top: -10%;
+            left: -10%;
+            animation-delay: 0s;
+        }
+
+        .orb-2 {
+            width: 400px;
+            height: 400px;
+            background: radial-gradient(circle, #06b6d4 0%, transparent 70%);
+            top: 40%;
+            right: -10%;
+            animation-delay: -7s;
+        }
+
+        .orb-3 {
+            width: 450px;
+            height: 450px;
+            background: radial-gradient(circle, #ec4899 0%, transparent 70%);
+            bottom: -15%;
+            left: 30%;
+            animation-delay: -14s;
+        }
+
+        @keyframes float {
+
+            0%,
+            100% {
+                transform: translate(0, 0) scale(1);
+            }
+
+            33% {
+                transform: translate(60px, -40px) scale(1.1);
+            }
+
+            66% {
+                transform: translate(-40px, 50px) scale(0.95);
+            }
+        }
+
+        /* 噪点纹理 */
+        .noise {
+            position: fixed;
+            inset: 0;
+            z-index: 1;
+            pointer-events: none;
+            opacity: 0.035;
+            mix-blend-mode: overlay;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+        }
+
+        /* 网格背景 */
+        .grid-bg {
+            position: fixed;
+            inset: 0;
+            z-index: 1;
+            pointer-events: none;
+            background-image:
+                linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+            background-size: 48px 48px;
+            mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+            -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+        }
+
+        /* 鼠标光晕 */
+        .cursor-glow {
+            position: fixed;
+            width: 400px;
+            height: 400px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(167, 139, 250, 0.12) 0%, transparent 60%);
+            pointer-events: none;
+            z-index: 2;
+            transform: translate(-50%, -50%);
+            transition: opacity 0.3s;
+            opacity: 0;
+        }
+
+        /* ===== 主容器 ===== */
+        .app {
+            position: relative;
+            z-index: 3;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 24px 60px;
+        }
+
+        /* ===== 顶部导航 ===== */
+        .nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 56px;
+            padding: 16px 20px;
+            background: var(--surface);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 600;
+            font-size: 15px;
+            letter-spacing: -0.01em;
+        }
+
+        .brand-dot {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            background: conic-gradient(from 0deg, #a78bfa, #22d3ee, #ec4899, #a78bfa);
+            position: relative;
+            animation: spin-slow 6s linear infinite;
+        }
+
+        .brand-dot::after {
+            content: '';
+            position: absolute;
+            inset: 3px;
+            background: var(--bg);
+            border-radius: 5px;
+        }
+
+        @keyframes spin-slow {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .nav-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        .live-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 12px var(--success);
+            animation: pulse-dot 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse-dot {
+
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.5;
+                transform: scale(1.3);
+            }
+        }
+
+        /* ===== Hero 区 ===== */
+        .hero {
+            text-align: center;
+            margin-bottom: 56px;
+            padding: 0 20px;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 100px;
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--text-dim);
+            margin-bottom: 24px;
+            letter-spacing: 0.05em;
+        }
+
+        .eyebrow-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--accent);
+            box-shadow: 0 0 8px var(--accent);
+        }
+
+        .hero h1 {
+            font-size: clamp(40px, 7vw, 72px);
+            font-weight: 700;
+            letter-spacing: -0.04em;
+            line-height: 1;
+            margin-bottom: 20px;
+            background: linear-gradient(180deg, #fff 0%, #a1a1aa 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero h1 .accent-text {
+            background: linear-gradient(135deg, #a78bfa 0%, #22d3ee 50%, #ec4899 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-size: 200% 200%;
+            animation: gradient-shift 5s ease infinite;
+        }
+
+        @keyframes gradient-shift {
+
+            0%,
+            100% {
+                background-position: 0% 50%;
+            }
+
+            50% {
+                background-position: 100% 50%;
+            }
+        }
+
+        .hero p {
+            font-size: 17px;
+            color: var(--text-dim);
+            max-width: 540px;
+            margin: 0 auto;
+            line-height: 1.6;
+        }
+
+        .host-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 28px;
+            padding: 10px 18px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            font-family: var(--mono);
+            font-size: 13px;
+            color: var(--text);
+        }
+
+        .host-chip .label {
+            color: var(--text-mute);
+        }
+
+        .host-chip .value {
+            color: var(--accent-2);
+        }
+
+        /* ===== Bento Grid ===== */
+        .bento {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .card {
+            background: var(--surface);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 24px;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 20px;
+            padding: 1px;
+            background: linear-gradient(135deg, transparent 40%, rgba(167, 139, 250, 0.3) 50%, transparent 60%);
+            background-size: 300% 300%;
+            background-position: 0% 0%;
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            opacity: 0;
+            transition: opacity 0.4s;
+        }
+
+        .card:hover {
+            background: var(--surface-hover);
+            border-color: var(--border-strong);
+            transform: translateY(-2px);
+        }
+
+        .card:hover::before {
+            opacity: 1;
+            animation: border-flow 3s linear infinite;
+        }
+
+        @keyframes border-flow {
+            to {
+                background-position: 300% 0;
+            }
+        }
+
+        /* 端口卡片 */
+        .port-card {
+            grid-column: span 2;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 180px;
+        }
+
+        .port-card .port-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .port-number {
+            font-family: var(--mono);
+            font-size: 40px;
+            font-weight: 600;
+            letter-spacing: -0.03em;
+            background: linear-gradient(180deg, #fff, #71717a);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            line-height: 1;
+        }
+
+        .port-tag {
+            font-family: var(--mono);
+            font-size: 10px;
+            padding: 4px 8px;
+            background: rgba(167, 139, 250, 0.1);
+            color: var(--accent);
+            border: 1px solid rgba(167, 139, 250, 0.2);
+            border-radius: 6px;
+            letter-spacing: 0.05em;
+        }
+
+        .port-name {
+            font-size: 14px;
+            color: var(--text-dim);
+            margin-top: 12px;
+        }
+
+        .port-action {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 20px;
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--text-mute);
+            transition: color 0.3s;
+        }
+
+        .port-card:hover .port-action {
+            color: var(--accent);
+        }
+
+        .port-action svg {
+            width: 14px;
+            height: 14px;
+            transition: transform 0.3s;
+        }
+
+        .port-card:hover .port-action svg {
+            transform: translateX(4px);
+        }
+
+        /* 批量卡片 */
+        .batch-card {
+            grid-column: span 6;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+            padding: 28px 32px;
+            background: linear-gradient(135deg, rgba(167, 139, 250, 0.08) 0%, rgba(34, 211, 238, 0.05) 100%);
+            border-color: rgba(167, 139, 250, 0.2);
+        }
+
+        .batch-card:hover {
+            background: linear-gradient(135deg, rgba(167, 139, 250, 0.12) 0%, rgba(34, 211, 238, 0.08) 100%);
+            border-color: rgba(167, 139, 250, 0.4);
+        }
+
+        .batch-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .batch-icon {
+            width: 52px;
+            height: 52px;
+            border-radius: 14px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 8px 24px rgba(167, 139, 250, 0.3);
+        }
+
+        .batch-icon svg {
+            width: 24px;
+            height: 24px;
+            stroke: #0a0a0f;
+            fill: none;
+            stroke-width: 2.5;
+        }
+
+        .batch-title {
+            font-size: 18px;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            margin-bottom: 4px;
+        }
+
+        .batch-desc {
+            font-size: 13px;
+            color: var(--text-dim);
+        }
+
+        .batch-cta {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 20px;
+            background: var(--text);
+            color: var(--bg);
+            border-radius: 12px;
+            font-family: var(--mono);
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+
+        .batch-card:hover .batch-cta {
+            transform: translateX(4px);
+            box-shadow: 0 8px 24px rgba(255, 255, 255, 0.15);
+        }
+
+        .batch-cta svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        /* ===== 结果面板 ===== */
+        .result-panel {
+            background: var(--surface);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 18px 24px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        .panel-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: var(--mono);
+            font-size: 13px;
+            color: var(--text-dim);
+        }
+
+        .panel-dots {
+            display: flex;
+            gap: 6px;
+        }
+
+        .panel-dots span {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--border-strong);
+        }
+
+        .panel-dots span:nth-child(1) {
+            background: #fb7185;
+        }
+
+        .panel-dots span:nth-child(2) {
+            background: #fbbf24;
+        }
+
+        .panel-dots span:nth-child(3) {
+            background: #34d399;
+        }
+
+        .panel-stats {
+            display: flex;
+            gap: 16px;
+            font-family: var(--mono);
+            font-size: 12px;
+        }
+
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--text-mute);
+        }
+
+        .stat-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+
+        .stat-dot.pass {
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+        }
+
+        .stat-dot.fail {
+            background: var(--danger);
+            box-shadow: 0 0 8px var(--danger);
+        }
+
+        .stat-dot.total {
+            background: var(--accent);
+            box-shadow: 0 0 8px var(--accent);
+        }
+
+        .stat b {
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        /* 进度条 */
+        .progress-track {
+            height: 2px;
+            background: var(--border);
+            position: relative;
+            overflow: hidden;
+            display: none;
+        }
+
+        .progress-track.active {
+            display: block;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), var(--accent-2));
+            box-shadow: 0 0 12px var(--accent);
+            width: 0%;
+            transition: width 0.4s ease;
+        }
+
+        /* 结果列表 */
+        .result-list {
+            padding: 16px;
+            min-height: 200px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .result-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .result-list::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .result-list::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 3px;
+        }
+
+        .result-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 200px;
+            color: var(--text-mute);
+            font-family: var(--mono);
+            font-size: 13px;
+            gap: 12px;
+        }
+
+        .empty-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: var(--surface);
+            border: 1px dashed var(--border-strong);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .empty-icon svg {
+            width: 20px;
+            height: 20px;
+            stroke: var(--text-mute);
+            fill: none;
+            stroke-width: 1.5;
+        }
+
+        /* 结果项 */
+        .log-item {
+            display: grid;
+            grid-template-columns: auto 1fr auto auto;
+            gap: 16px;
+            align-items: center;
+            padding: 14px 16px;
+            border-radius: 12px;
+            margin-bottom: 6px;
+            font-family: var(--mono);
+            font-size: 13px;
+            animation: log-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            border: 1px solid transparent;
+            transition: background 0.2s;
+        }
+
+        .log-item:hover {
+            background: var(--surface);
+        }
+
+        @keyframes log-in {
+            from {
+                opacity: 0;
+                transform: translateY(-8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .log-status {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .log-item.running .log-status {
+            background: rgba(251, 191, 36, 0.1);
+            border: 1px solid rgba(251, 191, 36, 0.2);
+        }
+
+        .log-item.success .log-status {
+            background: rgba(52, 211, 153, 0.1);
+            border: 1px solid rgba(52, 211, 153, 0.2);
+        }
+
+        .log-item.fail .log-status {
+            background: rgba(251, 113, 133, 0.1);
+            border: 1px solid rgba(251, 113, 133, 0.2);
+        }
+
+        .log-spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(251, 191, 36, 0.2);
+            border-top-color: var(--warning);
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .log-status svg {
+            width: 14px;
+            height: 14px;
+            fill: none;
+            stroke-width: 2.5;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .log-item.success .log-status svg {
+            stroke: var(--success);
+        }
+
+        .log-item.fail .log-status svg {
+            stroke: var(--danger);
+        }
+
+        .log-main {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+
+        .log-title {
+            color: var(--text);
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .log-title .port {
+            color: var(--accent-2);
+        }
+
+        .log-item.running .log-title {
+            color: var(--warning);
+        }
+
+        .log-item.success .log-title {
+            color: var(--success);
+        }
+
+        .log-item.fail .log-title {
+            color: var(--danger);
+        }
+
+        .log-desc {
+            font-size: 11px;
+            color: var(--text-mute);
+        }
+
+        .log-time {
+            font-size: 11px;
+            color: var(--text-mute);
+            white-space: nowrap;
+        }
+
+        .log-badge {
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+        }
+
+        .log-item.running .log-badge {
+            background: rgba(251, 191, 36, 0.1);
+            color: var(--warning);
+        }
+
+        .log-item.success .log-badge {
+            background: rgba(52, 211, 153, 0.1);
+            color: var(--success);
+        }
+
+        .log-item.fail .log-badge {
+            background: rgba(251, 113, 133, 0.1);
+            color: var(--danger);
+        }
+
+        /* 禁用态 */
+        .card.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        /* ===== 页脚 ===== */
+        .footer {
+            margin-top: 40px;
+            text-align: center;
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--text-mute);
+            letter-spacing: 0.05em;
+        }
+
+        /* ===== 移动端优化 ===== */
+        @media (max-width: 768px) {
+            .app {
+                padding: 20px 16px 40px;
+            }
+
+            .nav {
+                padding: 12px 16px;
+                margin-bottom: 32px;
+                border-radius: 14px;
+            }
+
+            .brand {
+                font-size: 14px;
+            }
+
+            .brand span {
+                display: none;
+            }
+
+            .nav-status {
+                font-size: 11px;
+            }
+
+            .hero {
+                margin-bottom: 32px;
+                padding: 0;
+            }
+
+            .eyebrow {
+                font-size: 10px;
+                padding: 5px 12px;
+                margin-bottom: 20px;
+            }
+
+            .hero h1 {
+                font-size: 36px;
+                margin-bottom: 16px;
+            }
+
+            .hero p {
+                font-size: 14px;
+                line-height: 1.5;
+            }
+
+            .host-chip {
+                margin-top: 20px;
+                padding: 8px 14px;
+                font-size: 12px;
+                gap: 8px;
+            }
+
+            .bento {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+
+            .port-card {
+                grid-column: span 1;
+                min-height: auto;
+                padding: 20px;
+                flex-direction: row;
+                align-items: center;
+                gap: 16px;
+            }
+
+            .port-card .port-top {
+                flex-direction: column;
+                gap: 8px;
+                flex-shrink: 0;
+            }
+
+            .port-number {
+                font-size: 32px;
+            }
+
+            .port-tag {
+                font-size: 9px;
+                padding: 3px 6px;
+            }
+
+            .port-card>div:last-child {
+                flex: 1;
+                min-width: 0;
+            }
+
+            .port-name {
+                font-size: 13px;
+                margin-top: 4px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .port-action {
+                margin-top: 8px;
+                font-size: 11px;
+            }
+
+            .batch-card {
+                grid-column: span 1;
+                flex-direction: column;
+                align-items: stretch;
+                padding: 20px;
+                gap: 16px;
+            }
+
+            .batch-left {
+                gap: 14px;
+            }
+
+            .batch-icon {
+                width: 44px;
+                height: 44px;
+                border-radius: 12px;
+                flex-shrink: 0;
+            }
+
+            .batch-icon svg {
+                width: 20px;
+                height: 20px;
+            }
+
+            .batch-title {
+                font-size: 16px;
+                margin-bottom: 2px;
+            }
+
+            .batch-desc {
+                font-size: 12px;
+            }
+
+            .batch-cta {
+                width: 100%;
+                justify-content: center;
+                padding: 14px 20px;
+                font-size: 14px;
+                border-radius: 12px;
+            }
+
+            .result-panel {
+                border-radius: 16px;
+            }
+
+            .panel-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+                padding: 14px 16px;
+            }
+
+            .panel-title {
+                font-size: 12px;
+            }
+
+            .panel-dots span {
+                width: 8px;
+                height: 8px;
+            }
+
+            .panel-stats {
+                width: 100%;
+                justify-content: space-between;
+                gap: 8px;
+                font-size: 11px;
+            }
+
+            .stat {
+                gap: 4px;
+            }
+
+            .stat-dot {
+                width: 5px;
+                height: 5px;
+            }
+
+            .result-list {
+                padding: 12px;
+                max-height: 400px;
+            }
+
+            .log-item {
+                grid-template-columns: auto 1fr auto;
+                gap: 12px;
+                padding: 12px;
+                font-size: 12px;
+            }
+
+            .log-status {
+                width: 26px;
+                height: 26px;
+            }
+
+            .log-spinner {
+                width: 12px;
+                height: 12px;
+            }
+
+            .log-status svg {
+                width: 12px;
+                height: 12px;
+            }
+
+            .log-title {
+                font-size: 12px;
+                gap: 6px;
+            }
+
+            .log-desc {
+                font-size: 10px;
+            }
+
+            .log-badge {
+                font-size: 9px;
+                padding: 2px 6px;
+            }
+
+            .log-time {
+                display: none;
+            }
+
+            .result-empty {
+                min-height: 160px;
+                font-size: 12px;
+            }
+
+            .empty-icon {
+                width: 40px;
+                height: 40px;
+            }
+
+            .empty-icon svg {
+                width: 18px;
+                height: 18px;
+            }
+
+            .footer {
+                font-size: 10px;
+                margin-top: 32px;
+            }
+
+            /* 触控优化 */
+            .card {
+                transition: all 0.2s ease;
+            }
+
+            .card:active {
+                transform: scale(0.98);
+                background: var(--surface-hover);
+            }
+
+            .port-card:active .port-action {
+                color: var(--accent);
+            }
+
+            .port-card:active .port-action svg {
+                transform: translateX(4px);
+            }
+        }
+
+        /* 小屏手机 */
+        @media (max-width: 380px) {
+            .hero h1 {
+                font-size: 32px;
+            }
+
+            .port-number {
+                font-size: 28px;
+            }
+
+            .port-name {
+                font-size: 12px;
+            }
+
+            .batch-title {
+                font-size: 15px;
+            }
+        }
+
+        /* 横屏优化 */
+        @media (max-height: 500px) and (orientation: landscape) {
+            .hero {
+                margin-bottom: 24px;
+            }
+
+            .hero h1 {
+                font-size: 28px;
+            }
+
+            .hero p {
+                font-size: 13px;
+            }
+
+            .bento {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .port-card {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .batch-card {
+                grid-column: span 2;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- 背景层 -->
+    <div class="bg-layer">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+    <div class="noise"></div>
+    <div class="grid-bg"></div>
+    <div class="cursor-glow" id="cursorGlow"></div>
+
+    <div class="app">
+        <!-- 导航 -->
+        <nav class="nav">
+            <div class="brand">
+                <div class="brand-dot"></div>
+                <span>PortPulse</span>
+            </div>
+            <div class="nav-status">
+                <span class="live-dot"></span>
+                <span>系统在线</span>
+            </div>
+        </nav>
+
+        <!-- Hero -->
+        <section class="hero">
+            <div class="eyebrow">
+                <span class="eyebrow-dot"></span>
+                <span>TCP 连通性检测工具</span>
+            </div>
+            <h1>端口连通<br><span class="accent-text">实时探测</span></h1>
+            <p>基于浏览器原生 Fetch API 建立 TCP 握手，毫秒级验证目标端口可达性</p>
+            <div class="host-chip">
+                <span class="label">目标主机</span>
+                <span class="value" id="hostText">—</span>
+            </div>
+        </section>
+
+        <!-- Bento Grid -->
+        <section class="bento">
+            <div class="card port-card" onclick="singleTest(80)" id="card-80">
+                <div class="port-top">
+                    <div class="port-number">80</div>
+                    <div class="port-tag">网页服务</div>
+                </div>
+                <div>
+                    <div class="port-name">HTTP · 超文本传输协议</div>
+                    <div class="port-action">
+                        <span>开始检测</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round">
+                            <path d="M5 12h14M13 5l7 7-7 7" />
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card port-card" onclick="singleTest(443)" id="card-443">
+                <div class="port-top">
+                    <div class="port-number">443</div>
+                    <div class="port-tag">加密网页</div>
+                </div>
+                <div>
+                    <div class="port-name">HTTPS · TLS 加密通道</div>
+                    <div class="port-action">
+                        <span>开始检测</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round">
+                            <path d="M5 12h14M13 5l7 7-7 7" />
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card port-card" onclick="singleTest(8080)" id="card-8080">
+                <div class="port-top">
+                    <div class="port-number">8080</div>
+                    <div class="port-tag">备用端口</div>
+                </div>
+                <div>
+                    <div class="port-name">ALT-HTTP · 代理或测试服务</div>
+                    <div class="port-action">
+                        <span>开始检测</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round">
+                            <path d="M5 12h14M13 5l7 7-7 7" />
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card batch-card" onclick="batchAllTest()" id="batchCard">
+                <div class="batch-left">
+                    <div class="batch-icon">
+                        <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="batch-title">批量全部检测</div>
+                        <div class="batch-desc">依次扫描所有端口 · 预计耗时 3-10 秒</div>
+                    </div>
+                </div>
+                <div class="batch-cta">
+                    <span>一键全部执行</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                        stroke-linecap="round">
+                        <path d="M5 12h14M13 5l7 7-7 7" />
+                    </svg>
+                </div>
+            </div>
+        </section>
+
+        <!-- 结果面板 -->
+        <section class="result-panel">
+            <div class="panel-header">
+                <div class="panel-title">
+                    <div class="panel-dots">
+                        <span></span><span></span><span></span>
+                    </div>
+                    <span>~/检测/结果日志</span>
+                </div>
+                <div class="panel-stats">
+                    <div class="stat"><span class="stat-dot total"></span>总计 <b id="totalCount">0</b></div>
+                    <div class="stat"><span class="stat-dot pass"></span>通过 <b id="passCount">0</b></div>
+                    <div class="stat"><span class="stat-dot fail"></span>失败 <b id="failCount">0</b></div>
+                </div>
+            </div>
+            <div class="progress-track" id="progressTrack">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
+            <div class="result-list" id="resultList">
+                <div class="result-empty">
+                    <div class="empty-icon">
+                        <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 6v6l4 2" />
+                        </svg>
+                    </div>
+                    <span>等待检测 · 点击上方端口卡片开始</span>
+                </div>
+            </div>
+        </section>
+
+        <div class="footer">
+            <p>PORTPULSE © 2026 · 浏览器 TCP 探测 · 结果仅供参考</p>
+        </div>
+    </div>
+
+    <script>
+        const serverHost = location.hostname;
+        document.getElementById('hostText').innerText = serverHost || 'localhost';
+        const testPortList = [80, 443, 8080];
+
+        let stats = { total: 0, pass: 0, fail: 0 };
+        let isRunning = false;
+
+        // 鼠标光晕（仅桌面端）
+        const cursorGlow = document.getElementById('cursorGlow');
+        if (window.matchMedia('(pointer: fine)').matches) {
+            document.addEventListener('mousemove', (e) => {
+                cursorGlow.style.left = e.clientX + 'px';
+                cursorGlow.style.top = e.clientY + 'px';
+                cursorGlow.style.opacity = '1';
+            });
+            document.addEventListener('mouseleave', () => {
+                cursorGlow.style.opacity = '0';
+            });
+        } else {
+            cursorGlow.style.display = 'none';
+        }
+
+        function updateStats() {
+            document.getElementById('totalCount').innerText = stats.total;
+            document.getElementById('passCount').innerText = stats.pass;
+            document.getElementById('failCount').innerText = stats.fail;
+        }
+
+        function setCardsDisabled(disabled) {
+            document.querySelectorAll('.port-card, .batch-card').forEach(c => {
+                c.classList.toggle('disabled', disabled);
+            });
+        }
+
+        function createLogItem(type, port, desc) {
+            const icons = {
+                running: `<div class="log-spinner"></div>`,
+                success: `<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>`,
+                fail: `<svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>`
+            };
+            const badges = {
+                running: '检测中',
+                success: '已开放',
+                fail: '已关闭'
+            };
+            const titles = {
+                running: `正在探测 <span class="port">${serverHost}:${port}</span>`,
+                success: `端口 <span class="port">${port}</span> 可达`,
+                fail: `端口 <span class="port">${port}</span> 不可达`
+            };
+            const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+
+            return `
+                <div class="log-item ${type}" data-port="${port}">
+                    <div class="log-status">${icons[type]}</div>
+                    <div class="log-main">
+                        <div class="log-title">${titles[type]}</div>
+                        <div class="log-desc">${desc}</div>
+                    </div>
+                    <div class="log-time">${time}</div>
+                    <div class="log-badge">${badges[type]}</div>
+                </div>
+            `;
+        }
+
+        function singleTest(port) {
+            if (isRunning) return;
+            isRunning = true;
+            setCardsDisabled(true);
+
+            const list = document.getElementById('resultList');
+            stats = { total: 1, pass: 0, fail: 0 };
+            updateStats();
+            list.innerHTML = createLogItem('running', port, '正在建立 TCP 握手...');
+
+            const abortCtrl = new AbortController();
+            const startTime = performance.now();
+            const timer = setTimeout(() => {
+                abortCtrl.abort();
+                stats.fail = 1;
+                updateStats();
+                list.innerHTML = createLogItem('fail', port, '3000 毫秒后超时 · 可能被防火墙或安全组拦截');
+                isRunning = false;
+                setCardsDisabled(false);
+            }, 3000);
+
+            fetch(`http://${serverHost}:${port}/`, {
+                signal: abortCtrl.signal,
+                mode: 'no-cors'
+            }).then(() => {
+                clearTimeout(timer);
+                const elapsed = Math.round(performance.now() - startTime);
+                stats.pass = 1;
+                updateStats();
+                list.innerHTML = createLogItem('success', port, `连接已建立 · 耗时 ${elapsed} 毫秒`);
+                isRunning = false;
+                setCardsDisabled(false);
+            }).catch(err => {
+                clearTimeout(timer);
+                if (err.name !== 'AbortError') {
+                    const elapsed = Math.round(performance.now() - startTime);
+                    stats.fail = 1;
+                    updateStats();
+                    list.innerHTML = createLogItem('fail', port, `连接被拒绝 · 耗时 ${elapsed} 毫秒`);
+                }
+                isRunning = false;
+                setCardsDisabled(false);
+            });
+        }
+
+        function batchAllTest() {
+            if (isRunning) return;
+            isRunning = true;
+            setCardsDisabled(true);
+
+            const list = document.getElementById('resultList');
+            const track = document.getElementById('progressTrack');
+            const bar = document.getElementById('progressBar');
+
+            stats = { total: testPortList.length, pass: 0, fail: 0 };
+            updateStats();
+            track.classList.add('active');
+            bar.style.width = '0%';
+
+            let resultHtml = '';
+            testPortList.forEach(port => {
+                resultHtml += createLogItem('running', port, '等待扫描...');
+            });
+            list.innerHTML = resultHtml;
+
+            let index = 0;
+
+            function updateLogItem(port, type, desc) {
+                const items = list.querySelectorAll('.log-item');
+                const target = Array.from(items).find(el => el.dataset.port == port && el.classList.contains('running'));
+                if (target) {
+                    target.outerHTML = createLogItem(type, port, desc);
+                }
+            }
+
+            function nextCheck() {
+                if (index >= testPortList.length) {
+                    track.classList.remove('active');
+                    isRunning = false;
+                    setCardsDisabled(false);
+                    return;
+                }
+
+                const port = testPortList[index];
+                const startTime = performance.now();
+                const abortCtrl = new AbortController();
+
+                const timer = setTimeout(() => {
+                    abortCtrl.abort();
+                    stats.fail++;
+                    updateStats();
+                    updateLogItem(port, 'fail', '超时 · 被防火墙拦截');
+                    index++;
+                    bar.style.width = `${(index / testPortList.length) * 100}%`;
+                    setTimeout(nextCheck, 300);
+                }, 3000);
+
+                fetch(`http://${serverHost}:${port}/`, {
+                    signal: abortCtrl.signal,
+                    mode: 'no-cors'
+                }).then(() => {
+                    clearTimeout(timer);
+                    const elapsed = Math.round(performance.now() - startTime);
+                    stats.pass++;
+                    updateStats();
+                    updateLogItem(port, 'success', `连接成功 · 耗时 ${elapsed} 毫秒`);
+                    index++;
+                    bar.style.width = `${(index / testPortList.length) * 100}%`;
+                    setTimeout(nextCheck, 300);
+                }).catch(err => {
+                    clearTimeout(timer);
+                    if (err.name !== 'AbortError') {
+                        const elapsed = Math.round(performance.now() - startTime);
+                        stats.fail++;
+                        updateStats();
+                        updateLogItem(port, 'fail', `连接拒绝 · 耗时 ${elapsed} 毫秒`);
+                    }
+                    index++;
+                    bar.style.width = `${(index / testPortList.length) * 100}%`;
+                    setTimeout(nextCheck, 300);
+                });
+            }
+
+            nextCheck();
+        }
+    </script>
+</body>
+
+</html>
